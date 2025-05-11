@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mario Jump - Browser Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #5c94fc; /* Sky blue */
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars from game elements moving off-screen */
+            color: white;
+        }
+        #game-container {
+            width: 90vw; /* Responsive width */
+            max-width: 700px; /* Max width for larger screens */
+            height: 70vh; /* Responsive height */
+            max-height: 400px; /* Max height */
+            background-color: #78c0fa; /* Lighter sky for game area */
+            border: 3px solid #000;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden; /* Crucial for containing game elements */
+            cursor: pointer; /* Add cursor pointer back as it's clickable */
+        }
+        .game-element {
+            position: absolute;
+            /* background-color: rgba(255,0,0,0.3); /* For debugging visibility */
+        }
+        #mario {
+            width: 30px; /* Initial size, adjust based on your image and desired scale */
+            height: 40px;
+            /* background-color: red; /* Placeholder color */
+            z-index: 10;
+            transition: transform 0.1s; /* For jump animation feel */
+        }
+        .ground {
+            background-color: #228B22; /* ForestGreen */
+            height: 60px;
+            z-index: 5;
+            display: flex; /* For adding details inside */
+            align-items: flex-start; /* Align details to the top */
+            overflow: hidden; /* Hide details that might stick out */
+        }
+        .ground-detail {
+            width: 20px;
+            height: 10px;
+            background-color: #006400; /* DarkGreen */
+            margin-right: 40px; /* Spacing between details */
+            margin-top: 5px;
+        }
+        .obstacle {
+            /* background-color: purple; Placeholder color */
+            z-index: 8;
+        }
+        #score-board {
+            margin-top: 20px;
+            font-size: 1.2rem;
+            text-align: center;
+            background-color: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+        }
+        #game-over-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.75);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            z-index: 1000;
+            display: none; /* Hidden by default */
+        }
+        #game-over-message h2 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        #game-over-message p {
+            font-size: 1rem;
+            margin-bottom: 20px;
+        }
+        .restart-button { 
+            font-family: 'Press Start 2P', cursive;
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            border: 2px solid white;
+            background-color: #f23535;
+            color: white;
+            border-radius: 8px;
+            transition: background-color 0.2s;
+        }
+        .restart-button:hover {
+            background-color: #c02a2a;
+        }
+
+        img {
+            image-rendering: pixelated; 
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body>
+    <div id="score-board">
+        <span>Score: <span id="current-score">0</span></span>
+        <span class="ml-6">High Score: <span id="high-score">0</span></span>
+    </div>
+
+    <div id="game-container">
+        <img id="mario" class="game-element" src="mario_character.png" alt="Mario">
+        </div>
+
+    <div id="game-over-message">
+        <h2>Game Over!</h2>
+        <p>Your Score: <span id="final-score">0</span></p>
+        <button id="restart-button" class="restart-button">Press Space or Click to Restart</button> 
+    </div>
+
+    <audio id="jump-sound" src="jump_boing.mp3" preload="auto"></audio>
+    <audio id="background-music" src="background_music.mp3" loop preload="auto"></audio>
+    <audio id="game-over-music" src="game_over_theme.mp3" preload="auto"></audio>
+
+    <script>
+        const gameContainer = document.getElementById('game-container');
+        const marioElement = document.getElementById('mario');
+        const currentScoreDisplay = document.getElementById('current-score');
+        const highScoreDisplay = document.getElementById('high-score');
+        const gameOverMessageElement = document.getElementById('game-over-message');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const restartButton = document.getElementById('restart-button');
+
+        const jumpSound = document.getElementById('jump-sound');
+        const backgroundMusic = document.getElementById('background-music');
+        const gameOverMusic = document.getElementById('game-over-music');
+
+        const GRAVITY = 0.8;
+        // --- JUMP FORCE ADJUSTED ---
+        const JUMP_FORCE = -18; // Was -15, more negative means higher jump
+        const GROUND_HEIGHT = 60; 
+        
+        let initialScrollSpeed = 1.5; 
+        let currentScrollSpeed = initialScrollSpeed;
+        const maxScrollSpeed = 4;
+        const scrollSpeedAcceleration = 0.0005; 
+
+        let initialObstacleSpawnInterval = 150; 
+        let currentObstacleSpawnInterval = initialObstacleSpawnInterval;
+        const minObstacleSpawnInterval = 70; 
+
+        let marioY = 0;
+        let marioVelocityY = 0;
+        let isJumping = false;
+        let isGameOver = false;
+        let score = 0;
+        let highScore = localStorage.getItem('marioJumpBrowserHighScore') || 0;
+
+        let groundElements = [];
+        let obstacles = [];
+        let framesSinceLastObstacle = 0;
+        let gameLoopId = null;
+
+        function setupGround() {
+            groundElements.forEach(g => g.element.remove());
+            groundElements = [];
+            const containerWidth = gameContainer.offsetWidth;
+            for (let i = 0; i < 2; i++) {
+                const ground = document.createElement('div');
+                ground.classList.add('game-element', 'ground');
+                ground.style.width = `${containerWidth}px`;
+                ground.style.bottom = '0px';
+                ground.style.left = `${i * containerWidth}px`;
+                for(let j=0; j < Math.floor(containerWidth / 60); j++) {
+                    const detail = document.createElement('div');
+                    detail.classList.add('ground-detail');
+                    ground.appendChild(detail);
+                }
+                gameContainer.appendChild(ground);
+                groundElements.push({ element: ground, x: i * containerWidth });
+            }
+        }
+
+        function setupMario() {
+            const containerHeight = gameContainer.offsetHeight;
+            marioY = containerHeight - GROUND_HEIGHT - marioElement.offsetHeight; 
+            marioElement.style.left = '50px'; 
+            marioElement.style.bottom = `${GROUND_HEIGHT}px`;
+            marioVelocityY = 0;
+            isJumping = false;
+        }
+        
+        function updateScoreBoard() {
+            currentScoreDisplay.textContent = score;
+            highScoreDisplay.textContent = highScore;
+        }
+
+        function startGame() {
+            console.log("Starting game...");
+            isGameOver = false;
+            score = 0;
+            currentScrollSpeed = initialScrollSpeed;
+            currentObstacleSpawnInterval = initialObstacleSpawnInterval;
+            framesSinceLastObstacle = 0;
+            
+            gameOverMessageElement.style.display = 'none';
+            
+            obstacles.forEach(obs => obs.element.remove());
+            obstacles = [];
+
+            setupMario();
+            setupGround(); 
+            updateScoreBoard();
+
+            gameOverMusic.pause();
+            gameOverMusic.currentTime = 0;
+            backgroundMusic.currentTime = 0; 
+            backgroundMusic.play().catch(e => console.warn("BG Music play interrupted:", e));
+
+            if (gameLoopId) cancelAnimationFrame(gameLoopId); 
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function gameLoop() {
+            if (isGameOver) {
+                console.log("Game Over - loop stopped.");
+                return;
+            }
+
+            marioVelocityY += GRAVITY;
+            marioY += marioVelocityY;
+
+            const containerHeight = gameContainer.offsetHeight;
+            const marioBottom = containerHeight - marioY - marioElement.offsetHeight;
+
+            if (marioBottom <= GROUND_HEIGHT) {
+                marioY = containerHeight - GROUND_HEIGHT - marioElement.offsetHeight;
+                marioVelocityY = 0;
+                isJumping = false;
+                marioElement.style.transform = 'translateY(0px)'; 
+            }
+            marioElement.style.bottom = `${containerHeight - marioY - marioElement.offsetHeight}px`;
+
+            groundElements.forEach(g => {
+                g.x -= currentScrollSpeed;
+                if (g.x + g.element.offsetWidth < 0) { 
+                    g.x += groundElements.length * g.element.offsetWidth; 
+                }
+                g.element.style.left = `${g.x}px`;
+            });
+
+            framesSinceLastObstacle++;
+            if (framesSinceLastObstacle >= currentObstacleSpawnInterval) {
+                spawnObstacle();
+                framesSinceLastObstacle = 0;
+            }
+
+            obstacles.forEach((obstacle, index) => {
+                obstacle.x -= currentScrollSpeed;
+                obstacle.element.style.left = `${obstacle.x}px`;
+
+                const marioRect = marioElement.getBoundingClientRect();
+                const obsRect = obstacle.element.getBoundingClientRect();
+
+                if (
+                    marioRect.left < obsRect.right &&
+                    marioRect.right > obsRect.left &&
+                    marioRect.top < obsRect.bottom &&
+                    marioRect.bottom > obsRect.top
+                ) {
+                    triggerGameOver();
+                }
+
+                if (obstacle.x + obstacle.element.offsetWidth < 0) {
+                    obstacle.element.remove();
+                    obstacles.splice(index, 1);
+                    if (!isGameOver) { 
+                        score++;
+                        updateScoreBoard();
+                    }
+                }
+            });
+            
+            if (currentScrollSpeed < maxScrollSpeed) {
+                currentScrollSpeed += scrollSpeedAcceleration;
+                currentScrollSpeed = Math.min(currentScrollSpeed, maxScrollSpeed);
+
+                const speedRatio = (currentScrollSpeed - initialScrollSpeed) / (maxScrollSpeed - initialScrollSpeed);
+                 if ((maxScrollSpeed - initialScrollSpeed) > 0.001) { 
+                    currentObstacleSpawnInterval = initialObstacleSpawnInterval - (initialObstacleSpawnInterval - minObstacleSpawnInterval) * speedRatio;
+                }
+                currentObstacleSpawnInterval = Math.max(currentObstacleSpawnInterval, minObstacleSpawnInterval);
+            }
+
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function spawnObstacle() {
+            const obstacleElement = document.createElement('img');
+            obstacleElement.classList.add('game-element', 'obstacle');
+            
+            const containerHeight = gameContainer.offsetHeight;
+            const containerWidth = gameContainer.offsetWidth;
+
+            if (Math.random() < 0.5) { 
+                obstacleElement.src = "piranha_plant.png"; 
+                obstacleElement.style.width = "25px"; 
+                obstacleElement.style.height = "35px"; 
+                obstacleElement.style.bottom = `${GROUND_HEIGHT}px`; 
+            } else { 
+                obstacleElement.src = "koopa_troopa.png"; 
+                obstacleElement.style.width = "35px";  
+                obstacleElement.style.height = "30px"; 
+                const marioHeight = marioElement.offsetHeight;
+                const minY = GROUND_HEIGHT + marioHeight + 40; 
+                const maxY = containerHeight - parseFloat(obstacleElement.style.height) - 20; 
+                obstacleElement.style.bottom = `${Math.random() * (maxY - minY) + minY}px`;
+            }
+            
+            const initialX = containerWidth;
+            obstacleElement.style.left = `${initialX}px`;
+            gameContainer.appendChild(obstacleElement);
+            obstacles.push({ element: obstacleElement, x: initialX });
+        }
+
+        function triggerGameOver() {
+            isGameOver = true;
+            cancelAnimationFrame(gameLoopId); 
+            
+            backgroundMusic.pause();
+            gameOverMusic.currentTime = 0;
+            gameOverMusic.play().catch(e => console.warn("Game Over Music play interrupted:", e));
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('marioJumpBrowserHighScore', highScore);
+            }
+            finalScoreDisplay.textContent = score;
+            updateScoreBoard(); 
+            gameOverMessageElement.style.display = 'flex';
+            console.log("Game Over! Score:", score, "High Score:", highScore);
+        }
+
+        function handleUserAction() {
+            if (isGameOver) {
+                startGame(); 
+            } else if (!isJumping) {
+                isJumping = true;
+                marioVelocityY = JUMP_FORCE; // This now uses the adjusted JUMP_FORCE
+                marioElement.style.transform = 'translateY(-10px)'; 
+                jumpSound.currentTime = 0; 
+                jumpSound.play().catch(e => console.warn("Jump sound play interrupted:", e));
+            }
+        }
+        
+        gameContainer.addEventListener('click', handleUserAction);
+
+        window.addEventListener('keydown', function(event) {
+            if (event.code === 'Space' || event.keyCode === 32) {
+                event.preventDefault(); 
+                handleUserAction();
+            }
+        });
+        
+        restartButton.addEventListener('click', (e) => {
+            e.stopPropagation(); 
+            if (isGameOver) startGame();
+        });
+
+        function adjustGameSize() {
+            // Future logic if needed
+        }
+        window.addEventListener('resize', adjustGameSize);
+        
+        window.onload = () => {
+            adjustGameSize(); 
+            startGame();
+        };
+
+    </script>
+</body>
+</html>
